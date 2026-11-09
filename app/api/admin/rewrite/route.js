@@ -52,7 +52,7 @@ export async function POST(req) {
 লেখা:
 ${text.slice(0, 8000)}`;
 
-  const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+  const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
   
   try {
     const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
