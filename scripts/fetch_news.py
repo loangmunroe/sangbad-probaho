@@ -32,7 +32,7 @@ UA = (
 HEADERS = {"User-Agent": UA, "Accept-Language": "bn-BD,bn;q=0.9,en;q=0.8"}
 TIMEOUT = 20
 
-MODEL = os.environ.get("GROQ_MODEL") or "llama-3.3-70b-versatile"
+MODEL = os.environ.get("GROQ_MODEL") or "llama-3.1-70b-versatile"
 API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 
