@@ -1,0 +1,58 @@
+{
+  "name": "সংবাদ প্রবাহ",
+  "tagline": "দেশের শীর্ষ পত্রিকাগুলোর খবর, এক জায়গায়",
+  "keepDays": 7,
+  "maxItems": 800,
+  "maxNewPerRun": 12,
+  "categories": [
+    { "slug": "national", "name": "জাতীয়", "color": "#b91c1c" },
+    { "slug": "politics", "name": "রাজনীতি", "color": "#7c2d12" },
+    { "slug": "country", "name": "সারাদেশ", "color": "#15803d" },
+    { "slug": "international", "name": "আন্তর্জাতিক", "color": "#1d4ed8" },
+    { "slug": "economy", "name": "অর্থনীতি", "color": "#a16207" },
+    { "slug": "sports", "name": "খেলা", "color": "#0f766e" },
+    { "slug": "entertainment", "name": "বিনোদন", "color": "#be185d" },
+    { "slug": "technology", "name": "প্রযুক্তি", "color": "#4338ca" },
+    { "slug": "education", "name": "শিক্ষা", "color": "#0369a1" },
+    { "slug": "health", "name": "স্বাস্থ্য", "color": "#047857" },
+    { "slug": "lifestyle", "name": "জীবনযাপন", "color": "#9333ea" }
+  ],
+  "sources": [
+    {
+      "id": "prothomalo",
+      "name": "প্রথম আলো",
+      "site": "prothomalo.com",
+      "rss": ["https://www.prothomalo.com/feed/"]
+    },
+    {
+      "id": "jugantor",
+      "name": "যুগান্তর",
+      "site": "jugantor.com",
+      "rss": ["https://www.jugantor.com/feed/rss.xml"]
+    },
+    {
+      "id": "kalerkantho",
+      "name": "কালের কণ্ঠ",
+      "site": "kalerkantho.com",
+      "rss": ["https://www.kalerkantho.com/rss.xml"]
+    },
+    {
+      "id": "samakal",
+      "name": "সমকাল",
+      "site": "samakal.com",
+      "rss": ["https://samakal.com/feed"]
+    },
+    {
+      "id": "banglatribune",
+      "name": "বাংলা ট্রিবিউন",
+      "site": "banglatribune.com",
+      "rss": ["https://www.banglatribune.com/feed/"]
+    },
+    {
+      "id": "dhakapost",
+      "name": "ঢাকা পোস্ট",
+      "site": "dhakapost.com",
+      "rss": ["https://www.dhakapost.com/rss/rss.xml"]
+    }
+  ]
+}
