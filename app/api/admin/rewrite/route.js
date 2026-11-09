@@ -14,11 +14,13 @@ function htmlToText(html) {
   return paras.join("\n\n");
 }
 
-// পেস্ট করা লেখা বা লিংক থেকে Gemini দিয়ে নিজস্ব ভাষায় খবর
+// পেস্ট করা লেখা বা লিংক থেকে Groq (Llama 3) দিয়ে নিজস্ব ভাষায় খবর
 export async function POST(req) {
   if (!(await isAuthed())) return unauthorized();
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return Response.json({ error: "Vercel-এ GEMINI_API_KEY সেট করা নেই" }, { status: 500 });
+  
+  // Groq API Key চেক করা
+  const key = process.env.GROQ_API_KEY;
+  if (!key) return Response.json({ error: "Vercel-এ GROQ_API_KEY সেট করা নেই" }, { status: 500 });
 
   let { text = "", url = "", sourceName = "" } = await req.json().catch(() => ({}));
   if (!text && url) {
@@ -50,22 +52,32 @@ export async function POST(req) {
 লেখা:
 ${text.slice(0, 8000)}`;
 
-  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.4 },
-        }),
-      }
-    );
+    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: "system", content: "You are a professional Bengali news editor. Output only valid JSON." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.4,
+        response_format: { type: "json_object" }
+      }),
+    });
+    
     const data = await r.json();
-    if (!r.ok) throw new Error(data?.error?.message || `Gemini ${r.status}`);
-    const out = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+    if (!r.ok) throw new Error(data?.error?.message || `Groq error ${r.status}`);
+    
+    const contentString = data.choices?.[0]?.message?.content || "{}";
+    const out = JSON.parse(contentString);
+    
     return Response.json({
       title: out.title || "",
       excerpt: out.excerpt || "",
