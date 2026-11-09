@@ -1,14 +1,10 @@
 """
-সংবাদ প্রবাহ — অটোমেটিক নিউজ ফেচার
+সংবাদ প্রবাহ — অটোমেটিক নিউজ ফেচার (Groq Version)
 
 কী করে:
   1. config/site.json-এ থাকা প্রতিটি পত্রিকার RSS পড়ে (না পেলে Google News থেকে)
-  2. নতুন খবরের মূল লেখা থেকে তথ্য নিয়ে Gemini দিয়ে নিজস্ব বাংলা সারাংশ লেখায়
+  2. নতুন খবরের মূল লেখা থেকে তথ্য নিয়ে Groq (Llama 3) দিয়ে নিজস্ব বাংলা সারাংশ লেখায়
   3. সূত্র ও মূল লিংকসহ data/news.json-এ সেভ করে
-
-GitHub Actions এটা প্রতি ৩০ মিনিটে চালায়। লোকালি চালাতে:
-  pip install -r scripts/requirements.txt
-  GEMINI_API_KEY=xxxx python scripts/fetch_news.py
 """
 
 import datetime as dt
@@ -36,8 +32,8 @@ UA = (
 HEADERS = {"User-Agent": UA, "Accept-Language": "bn-BD,bn;q=0.9,en;q=0.8"}
 TIMEOUT = 20
 
-MODEL = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
-API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+MODEL = os.environ.get("GROQ_MODEL") or "llama-3.3-70b-versatile"
+API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 
 def log(*a):
@@ -147,17 +143,15 @@ def fetch_article_text(url: str) -> str:
         return ""
 
 
-# ---------------------------------------------------------------- gemini
+# ---------------------------------------------------------------- groq
 
 _client = None
 
-
-def gemini():
+def get_groq_client():
     global _client
     if _client is None:
-        from google import genai
-
-        _client = genai.Client(api_key=API_KEY)
+        from groq import Groq
+        _client = Groq(api_key=API_KEY)
     return _client
 
 
@@ -178,7 +172,7 @@ def build_prompt(title: str, text: str, source_name: str, categories: list, rece
 
 নিয়ম:
 - সম্পূর্ণ নিজের ভাষায় লিখবে। মূল লেখার কোনো বাক্য হুবহু বা প্রায় হুবহু নেবে না।
-- শুধু মূল লেখায় থাকা তথ্য ব্যবহার করবে। নিজে থেকে কোনো তথ্য, সংখ্যা, নাম বা উদ্ধৃতি যোগ করবে না।
+- শুধু মূল লেখায় থাকা তথ্য ব্যবহার করবে। নিজে থেকে কোনো তথ্য, সংখ্যা, নাম বা উদ্ধৃতি যোগ করবে পণ্ডিতি করবে না।
 - ২ থেকে ৪টি ছোট অনুচ্ছেদ, মোট ১২০–২২০ শব্দ। প্রথম অনুচ্ছেদে মূল খবর।
 - প্রমিত বাংলা, নিরপেক্ষ সংবাদের ভাষা।
 - নতুন একটি শিরোনাম দেবে (মূল শিরোনাম হুবহু নয়), ১২ শব্দের মধ্যে।
@@ -197,21 +191,22 @@ def build_prompt(title: str, text: str, source_name: str, categories: list, rece
 
 
 def summarize(title, text, source_name, categories, recent):
-    from google.genai import types
-
     prompt = build_prompt(title, text, source_name, categories, recent)
     recent_ids = {n["id"] for n in recent}
     for attempt in range(3):
         try:
-            resp = gemini().models.generate_content(
+            resp = get_groq_client().chat.completions.create(
                 model=MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.4,
-                ),
+                messages=[
+                    {"role": "system", "content": "You are a professional Bengali news editor. Output only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.4,
+                response_format={"type": "json_object"}
             )
-            data = json.loads(resp.text)
+            content = resp.choices[0].message.content
+            data = json.loads(content)
+            
             if isinstance(data, list):
                 data = data[0]
             dup = data.get("duplicate_of")
@@ -232,8 +227,8 @@ def summarize(title, text, source_name, categories, recent):
             }
         except Exception as e:  # noqa: BLE001
             msg = str(e)
-            wait = 30 if ("429" in msg or "RESOURCE_EXHAUSTED" in msg) else 5
-            log(f"   ! Gemini error (try {attempt + 1}): {msg[:160]}")
+            wait = 30 if ("429" in msg) else 5
+            log(f"   ! Groq error (try {attempt + 1}): {msg[:160]}")
             time.sleep(wait)
     return None
 
@@ -406,7 +401,7 @@ def find_image(subject, query, used: set, category: str = ""):
 
 def main():
     if not API_KEY:
-        log("GEMINI_API_KEY সেট করা নেই। GitHub → Settings → Secrets-এ যোগ করুন।")
+        log("GROQ_API_KEY সেট করা নেই। GitHub → Settings → Secrets-এ যোগ করুন।")
         sys.exit(1)
 
     cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -457,7 +452,7 @@ def main():
         # ধাপ ১: শিরোনামের শব্দ মিলিয়ে দ্রুত ডুপ্লিকেট চেক
         dup = lexical_duplicate(it["title"], recent)
         if dup:
-            log(f"    ↳ ডুপ্লিকেট (শব্দ মিল): {dup['title'][:50]}")
+            log(f"   ↳ ডুপ্লিকেট (শব্দ মিল): {dup['title'][:50]}")
             mark_also(dup, src, url)
             seen.update({url, feed_url})
             continue
@@ -466,18 +461,18 @@ def main():
         if len(text) < 300 and len(it["summary"]) > len(text):
             text = it["summary"]
         if len(text) < 150:
-            log("    (যথেষ্ট লেখা পাওয়া যায়নি, বাদ)")
+            log("   (যথেষ্ট লেখা পাওয়া যায়নি, বাদ)")
             seen.add(url)
             continue
 
-        # ধাপ ২: Gemini একই কলে ঘটনা মিলিয়ে দেখে + লেখে
+        # ধাপ ২: Groq একই কলে ঘটনা মিলিয়ে দেখে + লেখে
         ai = summarize(it["title"], text, src["name"], categories, recent[:80])
         if not ai:
             continue
         if ai.get("duplicate_of"):
             target = next((n for n in news if n["id"] == ai["duplicate_of"]), None)
             if target:
-                log(f"    ↳ ডুপ্লিকেট (একই ঘটনা): {target['title'][:50]}")
+                log(f"   ↳ ডুপ্লিকেট (একই ঘটনা): {target['title'][:50]}")
                 mark_also(target, src, url)
             seen.update({url, feed_url})
             continue
@@ -500,7 +495,7 @@ def main():
         seen.add(url)
         seen.add(feed_url)
         added += 1
-        time.sleep(4)  # rate limit-এর জন্য একটু বিরতি
+        time.sleep(2)  # Groq বেশ ফাস্ট, তাই একটু কম বিরতি হলেও চলে
 
     # 3) prune & save
     cutoff = now_utc() - dt.timedelta(days=cfg.get("keepDays", 7))
