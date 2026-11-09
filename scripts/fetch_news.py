@@ -32,7 +32,7 @@ UA = (
 HEADERS = {"User-Agent": UA, "Accept-Language": "bn-BD,bn;q=0.9,en;q=0.8"}
 TIMEOUT = 20
 
-MODEL = os.environ.get("GROQ_MODEL") or "llama-3.1-70b-versatile"
+MODEL = os.environ.get("GROQ_MODEL") or "llama-3.1-8b-instant"
 API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 
@@ -495,7 +495,7 @@ def main():
         seen.add(url)
         seen.add(feed_url)
         added += 1
-        time.sleep(2)  # Groq বেশ ফাস্ট, তাই একটু কম বিরতি হলেও চলে
+        time.sleep(15)  # Groq বেশ ফাস্ট, তাই একটু কম বিরতি হলেও চলে
 
     # 3) prune & save
     cutoff = now_utc() - dt.timedelta(days=cfg.get("keepDays", 7))
