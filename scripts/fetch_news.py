@@ -36,7 +36,7 @@ UA = (
 HEADERS = {"User-Agent": UA, "Accept-Language": "bn-BD,bn;q=0.9,en;q=0.8"}
 TIMEOUT = 20
 
-MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+MODEL = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
 API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 
