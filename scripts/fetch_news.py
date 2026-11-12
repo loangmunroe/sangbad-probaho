@@ -32,8 +32,21 @@ UA = (
 HEADERS = {"User-Agent": UA, "Accept-Language": "bn-BD,bn;q=0.9,en;q=0.8"}
 TIMEOUT = 20
 
-MODEL = os.environ.get("GROQ_MODEL") or "openai/gpt-oss-120b"
 API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+
+# Groq-এর ফ্রি প্ল্যানে প্রতিটা মডেলের আলাদা দৈনিক টোকেন সীমা থাকে (যেমন gpt-oss-120b: ২ লাখ/দিন, ৮ হাজার/মিনিট)।
+# তাই একটার সীমা শেষ হলে পরেরটায় চলে যায়। GROQ_MODEL দিলে সেটা সবার আগে চেষ্টা হবে।
+DEFAULT_MODELS = [
+    "openai/gpt-oss-120b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+]
+_first = (os.environ.get("GROQ_MODEL") or "").strip()
+MODELS = ([_first] if _first else []) + [m for m in DEFAULT_MODELS if m != _first]
+_dead_models = set()   # এই রানে যেগুলোর দৈনিক সীমা শেষ বা মডেল আর নেই
+TPM_BUDGET = 7000      # প্রতি মিনিটে এর বেশি টোকেন না পাঠানোর চেষ্টা
+_last_call = {"t": 0.0, "tokens": 0}
 
 
 def log(*a):
@@ -157,7 +170,7 @@ def get_groq_client():
 
 def build_prompt(title: str, text: str, source_name: str, categories: list, recent: list) -> str:
     cat_list = ", ".join(f'"{c["slug"]}" ({c["name"]})' for c in categories)
-    recent_block = "\n".join(f'{n["id"]}: {n["title"]} | {n.get("originalTitle", "")}' for n in recent) or "(নেই)"
+    recent_block = "\n".join(f'{n["id"]}: {n["title"]}' for n in recent) or "(নেই)"
     return f"""তুমি একটি বাংলাদেশি অনলাইন পত্রিকার অভিজ্ঞ সম্পাদক।
 
 প্রথমে দেখো: নিচের "ইতিমধ্যে প্রকাশিত" তালিকার কোনো খবর আর এই নতুন খবরটি কি একই ঘটনা নিয়ে?
@@ -172,9 +185,10 @@ def build_prompt(title: str, text: str, source_name: str, categories: list, rece
 
 নিয়ম:
 - সম্পূর্ণ নিজের ভাষায় লিখবে। মূল লেখার কোনো বাক্য হুবহু বা প্রায় হুবহু নেবে না।
-- শুধু মূল লেখায় থাকা তথ্য ব্যবহার করবে। নিজে থেকে কোনো তথ্য, সংখ্যা, নাম বা উদ্ধৃতি যোগ করবে পণ্ডিতি করবে না।
+- শুধু মূল লেখায় থাকা তথ্য ব্যবহার করবে। নিজে থেকে কোনো তথ্য, সংখ্যা, নাম বা উদ্ধৃতি যোগ করবে না।
 - ২ থেকে ৪টি ছোট অনুচ্ছেদ, মোট ১২০–২২০ শব্দ। প্রথম অনুচ্ছেদে মূল খবর।
 - প্রমিত বাংলা, নিরপেক্ষ সংবাদের ভাষা।
+- লেখায় কোনো সংবাদমাধ্যম, পত্রিকা বা টিভি চ্যানেলের নাম উল্লেখ করবে না (যেমন "প্রথম আলোকে বলেন" না লিখে শুধু "বলেন")।
 - নতুন একটি শিরোনাম দেবে (মূল শিরোনাম হুবহু নয়), ১২ শব্দের মধ্যে।
 - category অবশ্যই এগুলোর একটি: {cat_list}
 - image_subject: খবরের কেন্দ্রে কোনো সুপরিচিত ব্যক্তি, স্থাপনা বা জায়গা থাকলে তার ইংরেজি নাম (যেমন "Jatiya Sangsad Bhaban", "Shakib Al Hasan"), না থাকলে null।
@@ -186,50 +200,83 @@ def build_prompt(title: str, text: str, source_name: str, categories: list, rece
 মূল শিরোনাম: {title}
 
 মূল লেখা:
-{text[:6000]}
+{text[:3000]}
 """
+
+
+def _pace():
+    """মিনিটপ্রতি টোকেন সীমা (TPM) পার না করতে আগের কলের আকার বুঝে অপেক্ষা।"""
+    need = 60.0 * _last_call["tokens"] / TPM_BUDGET
+    gap = time.time() - _last_call["t"]
+    if gap < need:
+        time.sleep(need - gap)
+
+
+def _call_groq(model, prompt):
+    kwargs = dict(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a professional Bengali news editor. Output only valid JSON."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.4,
+        max_completion_tokens=1800,
+        response_format={"type": "json_object"},
+    )
+    if "gpt-oss" in model:
+        kwargs["reasoning_effort"] = "low"  # কম চিন্তা = কম টোকেন খরচ
+    _pace()
+    resp = get_groq_client().chat.completions.create(**kwargs)
+    used = getattr(getattr(resp, "usage", None), "total_tokens", 0) or 3000
+    _last_call.update(t=time.time(), tokens=used)
+    return resp.choices[0].message.content
 
 
 def summarize(title, text, source_name, categories, recent):
     prompt = build_prompt(title, text, source_name, categories, recent)
     recent_ids = {n["id"] for n in recent}
-    for attempt in range(3):
-        try:
-            resp = get_groq_client().chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a professional Bengali news editor. Output only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.4,
-                response_format={"type": "json_object"}
-            )
-            content = resp.choices[0].message.content
-            data = json.loads(content)
-            
-            if isinstance(data, list):
-                data = data[0]
-            dup = data.get("duplicate_of")
-            if dup and dup in recent_ids:
-                return {"duplicate_of": dup}
-            paras = [p.strip() for p in data.get("paragraphs", []) if p and p.strip()]
-            if not data.get("title") or not paras:
-                raise ValueError("empty AI output")
-            slugs = {c["slug"] for c in categories}
-            cat = data.get("category") if data.get("category") in slugs else categories[0]["slug"]
-            return {
-                "title": data["title"].strip(),
-                "excerpt": (data.get("excerpt") or paras[0][:160]).strip(),
-                "paragraphs": paras,
-                "category": cat,
-                "_image_subject": (data.get("image_subject") or "").strip() or None,
-                "_image_query": (data.get("image_query") or "").strip() or None,
-            }
-        except Exception as e:  # noqa: BLE001
-            msg = str(e)
-            wait = 30 if ("429" in msg) else 5
-            log(f"   ! Groq error (try {attempt + 1}): {msg[:160]}")
-            time.sleep(wait)
+    for model in MODELS:
+        if model in _dead_models:
+            continue
+        for attempt in range(2):
+            try:
+                data = json.loads(_call_groq(model, prompt))
+                if isinstance(data, list):
+                    data = data[0]
+                dup = data.get("duplicate_of")
+                if dup and dup in recent_ids:
+                    return {"duplicate_of": dup}
+                paras = [p.strip() for p in data.get("paragraphs", []) if p and p.strip()]
+                if not data.get("title") or not paras:
+                    raise ValueError("empty AI output")
+                slugs = {c["slug"] for c in categories}
+                cat = data.get("category") if data.get("category") in slugs else categories[0]["slug"]
+                return {
+                    "title": data["title"].strip(),
+                    "excerpt": (data.get("excerpt") or paras[0][:160]).strip(),
+                    "paragraphs": paras,
+                    "category": cat,
+                    "_image_subject": (data.get("image_subject") or "").strip() or None,
+                    "_image_query": (data.get("image_query") or "").strip() or None,
+                }
+            except Exception as e:  # noqa: BLE001
+                msg = str(e)
+                code = getattr(e, "status_code", None)
+                low = msg.lower()
+                if "tokens per day" in low or "requests per day" in low or "(tpd)" in low or "(rpd)" in low:
+                    log(f"   ! {model}: আজকের সীমা শেষ, পরের মডেলে যাচ্ছি")
+                    _dead_models.add(model)
+                    break
+                if code in (400, 404) and ("model" in low and ("not found" in low or "decommission" in low or "does not exist" in low)):
+                    log(f"   ! {model}: মডেল পাওয়া যায়নি, বাদ")
+                    _dead_models.add(model)
+                    break
+                if code == 413 or "request too large" in low:
+                    log(f"   ! {model}: লেখা বেশি বড়, পরের মডেলে যাচ্ছি")
+                    break
+                wait = 60 if (code == 429 or "429" in msg) else 5
+                log(f"   ! {model} error (try {attempt + 1}): {msg[:160]}")
+                time.sleep(wait)
     return None
 
 
@@ -269,137 +316,80 @@ def mark_also(item: dict, src: dict, url: str):
 # ---------------------------------------------------------------- images
 
 WIKI_UA = "SangbadProbahoBot/1.0 (news aggregator; contact via GitHub repo)"
-PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
+JUNK = re.compile(r"map|logo|flag|coat.of.arms|seal|emblem|diagram|chart|graph|icon|signature|locator|svg|banner|poster|stamp", re.I)
+FREE_FIRST = ("pd", "public domain", "cc0", "cc-zero")
 
 
-def wikimedia_image(subject: str, used: set):
-    """Wikimedia Commons থেকে ফ্রি লাইসেন্সের আসল ছবি।"""
+def wikimedia_image(subject: str, used: set, strict: bool = True):
+    """
+    Wikimedia Commons থেকে মুক্ত লাইসেন্সের আসল ছবি।
+    strict=True: ফাইলের নামে ব্যক্তি/জায়গার নাম থাকতেই হবে (ভুল মানুষের ছবি এড়াতে)।
+    পাবলিক ডোমেইন / CC0 ছবি আগে, বড় ও আড়াআড়ি ছবি আগে।
+    """
     try:
         r = requests.get(
             "https://commons.wikimedia.org/w/api.php",
             params={
                 "action": "query", "format": "json", "generator": "search",
-                "gsrsearch": f"{subject} filetype:bitmap", "gsrnamespace": 6, "gsrlimit": 8,
-                "prop": "imageinfo", "iiprop": "url|extmetadata|size", "iiurlwidth": 1200,
+                "gsrsearch": f"{subject} filetype:bitmap", "gsrnamespace": 6, "gsrlimit": 20,
+                "prop": "imageinfo", "iiprop": "url|extmetadata|size", "iiurlwidth": 1280,
             },
             headers={"User-Agent": WIKI_UA}, timeout=TIMEOUT,
         )
-        pages = sorted((r.json().get("query", {}).get("pages", {}) or {}).values(), key=lambda p: p.get("index", 99))
-        key_words = {w.lower() for w in re.findall(r"[A-Za-z]{3,}", subject)}
+        pages = (r.json().get("query", {}).get("pages", {}) or {}).values()
+        key_words = {w.lower() for w in re.findall(r"[A-Za-z]{3,}", subject) if w.lower() not in {"the", "and", "bangladesh"}}
+        candidates = []
         for p in pages:
             info = (p.get("imageinfo") or [{}])[0]
             title = p.get("title", "").lower()
             url = info.get("thumburl") or info.get("url")
+            w, h = info.get("width", 0), info.get("height", 0)
             if not url or url in used or not re.search(r"\.(jpe?g|png|webp)$", title):
                 continue
-            if key_words and not any(w in title for w in key_words):
+            if JUNK.search(title) or w < 900 or h < 500:
+                continue
+            hits = sum(1 for k in key_words if k in title)
+            if strict and key_words and hits == 0:
                 continue  # নাম না মিললে ভুল ছবির ঝুঁকি, বাদ
-            if info.get("width", 0) < 500:
+            if not strict and key_words and hits == 0:
                 continue
             meta = info.get("extmetadata", {})
-            artist = strip_html(meta.get("Artist", {}).get("value", ""))[:60]
-            lic = meta.get("LicenseShortName", {}).get("value", "")
-            credit = " · ".join(x for x in [artist, lic, "Wikimedia Commons"] if x)
-            return {"image": url, "imageCaption": "ফাইল ছবি", "imageCredit": credit,
-                    "imageCreditUrl": info.get("descriptionurl", "")}
+            lic = strip_html(meta.get("LicenseShortName", {}).get("value", ""))
+            artist = strip_html(meta.get("Artist", {}).get("value", ""))[:50]
+            free = any(f in lic.lower() for f in FREE_FIRST)
+            score = hits * 10 + (5 if free else 0) + (3 if w >= h * 1.2 else 0) + min(w, 3000) / 1000 - p.get("index", 20) / 10
+            credit = "উইকিমিডিয়া কমন্স" if free else ", ".join(x for x in [artist, lic] if x) or "উইকিমিডিয়া কমন্স"
+            candidates.append((score, {
+                "image": url,
+                "imageCaption": "ফাইল ছবি" if strict else "প্রতীকী ছবি",
+                "imageCredit": credit,
+            }))
+        if candidates:
+            candidates.sort(key=lambda c: -c[0])
+            return candidates[0][1]
     except Exception as e:  # noqa: BLE001
         log(f"   ! wikimedia: {e}")
     return None
 
 
-def pexels_image(query: str, used: set):
-    """Pexels থেকে বিষয়ভিত্তিক আসল ফটো (প্রতীকী ছবি)।"""
-    if not PEXELS_KEY:
-        return None
-    try:
-        r = requests.get(
-            "https://api.pexels.com/v1/search",
-            params={"query": query, "per_page": 15, "orientation": "landscape"},
-            headers={"Authorization": PEXELS_KEY}, timeout=TIMEOUT,
-        )
-        for ph in r.json().get("photos", []):
-            url = ph["src"].get("large") or ph["src"].get("landscape")
-            if url and url not in used:
-                return {"image": url, "imageCaption": "প্রতীকী ছবি",
-                        "imageCredit": f"{ph.get('photographer', '')} · Pexels",
-                        "imageCreditUrl": ph.get("url", "")}
-    except Exception as e:  # noqa: BLE001
-        log(f"   ! pexels: {e}")
-    return None
-
-
-# খবরের নির্দিষ্ট ছবি না মিললে বিভাগভিত্তিক প্রতীকী ছবি, যাতে প্রায় সব খবরে ছবি থাকে
-CATEGORY_QUERIES = {
-    "national": "Dhaka city street", "politics": "parliament government building",
-    "country": "Bangladesh village river", "international": "world capital city",
-    "economy": "stock market finance", "sports": "cricket stadium",
-    "entertainment": "concert stage lights", "technology": "smartphone technology",
-    "education": "students classroom", "health": "hospital doctor",
-    "lifestyle": "lifestyle food market",
-}
-
-
-UNSPLASH_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "").strip()
-UTM = "utm_source=sangbad_probaho&utm_medium=referral"
-_unsplash_calls = 0
-UNSPLASH_MAX_PER_RUN = 20  # ফ্রি ডেমো কী: ঘণ্টায় ৫০টা অনুরোধ, তাই প্রতি রানে সীমা
-
-
-def unsplash_image(query: str, used: set):
-    """Unsplash থেকে বিষয়ভিত্তিক আসল ফটো (প্রতীকী ছবি)। Unsplash নিজেই হটলিংক করতে বলে।"""
-    global _unsplash_calls
-    if not UNSPLASH_KEY or _unsplash_calls >= UNSPLASH_MAX_PER_RUN:
-        return None
-    _unsplash_calls += 1
-    try:
-        r = requests.get(
-            "https://api.unsplash.com/search/photos",
-            params={"query": query, "per_page": 15, "orientation": "landscape", "content_filter": "high"},
-            headers={"Authorization": f"Client-ID {UNSPLASH_KEY}", "Accept-Version": "v1"},
-            timeout=TIMEOUT,
-        )
-        if r.status_code == 403 or r.status_code == 429:
-            log("   ! Unsplash রেট লিমিট, এই রানে আর চেষ্টা নয়")
-            _unsplash_calls = UNSPLASH_MAX_PER_RUN
-            return None
-        for ph in r.json().get("results", []):
-            url = (ph.get("urls") or {}).get("regular")
-            if not url or url in used:
-                continue
-            # Unsplash-এর নিয়ম: ছবি ব্যবহার করলে download_location-এ একটা পিং পাঠাতে হয়
-            dl = (ph.get("links") or {}).get("download_location")
-            if dl:
-                try:
-                    requests.get(dl, headers={"Authorization": f"Client-ID {UNSPLASH_KEY}"}, timeout=10)
-                except Exception:  # noqa: BLE001
-                    pass
-            user = ph.get("user") or {}
-            return {"image": url, "imageCaption": "প্রতীকী ছবি",
-                    "imageCredit": f"{user.get('name', '')} · Unsplash",
-                    "imageCreditUrl": f"{(user.get('links') or {}).get('html', 'https://unsplash.com')}?{UTM}"}
-    except Exception as e:  # noqa: BLE001
-        log(f"   ! unsplash: {e}")
-    return None
-
-
-def stock_image(query: str, used: set):
-    return unsplash_image(query, used) or pexels_image(query, used)
-
-
 def find_image(subject, query, used: set, category: str = ""):
+    """
+    শুধু Wikimedia Commons-এর মুক্ত লাইসেন্সের আসল ছবি (স্টক ফটো নয়)।
+    আগে খবরের মূল ব্যক্তি/জায়গার নাম দিয়ে খোঁজে, না পেলে বিষয়ের শব্দ দিয়ে।
+    কিছু না মিললে খবর ছবি ছাড়াই যায়, সাইট সেটা সুন্দরভাবে দেখায়।
+    """
     img = None
     if subject:
         img = wikimedia_image(subject, used)
     if not img and query:
-        img = stock_image(query, used)
-    if not img and category in CATEGORY_QUERIES:
-        img = stock_image(CATEGORY_QUERIES[category], used)
+        img = wikimedia_image(f"{query} Bangladesh", used, strict=False)
     return img or {}
 
 
 # ------------------------------------------------------------------ main
 
 def main():
+    log(f"মডেল ক্রম: {', '.join(MODELS)}")
     if not API_KEY:
         log("GROQ_API_KEY সেট করা নেই। GitHub → Settings → Secrets-এ যোগ করুন।")
         sys.exit(1)
@@ -466,7 +456,7 @@ def main():
             continue
 
         # ধাপ ২: Groq একই কলে ঘটনা মিলিয়ে দেখে + লেখে
-        ai = summarize(it["title"], text, src["name"], categories, recent[:80])
+        ai = summarize(it["title"], text, src["name"], categories, recent[:40])
         if not ai:
             continue
         if ai.get("duplicate_of"):
@@ -495,7 +485,12 @@ def main():
         seen.add(url)
         seen.add(feed_url)
         added += 1
-        time.sleep(15)  # Groq বেশ ফাস্ট, তাই একটু কম বিরতি হলেও চলে
+
+    # স্টক ফটো (Unsplash/Pexels) আর ব্যবহার হয় না, পুরনো খবর থেকেও সরানো
+    for n in news:
+        if re.search(r"unsplash\.com|pexels\.com", n.get("image") or ""):
+            for k in ("image", "imageCaption", "imageCredit", "imageCreditUrl"):
+                n.pop(k, None)
 
     # 3) prune & save
     cutoff = now_utc() - dt.timedelta(days=cfg.get("keepDays", 7))
