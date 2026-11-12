@@ -1,22 +1,22 @@
 import "./globals.css";
-import { site } from "@/lib/news";
+import { site, fontStylesheets, fontVars } from "@/lib/site";
 
 export const metadata = {
   title: { default: `${site.name} | ${site.tagline}`, template: `%s | ${site.name}` },
   description: site.tagline,
+  icons: { icon: site.favicon || "/favicon.svg", apple: site.favicon || "/favicon.svg" },
+  openGraph: { siteName: site.name, locale: "bn_BD", type: "website" },
 };
+
+export const viewport = { themeColor: "#006a4e" };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="bn">
+    <html lang="bn" style={fontVars()}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@600;700;800&family=Noto+Sans+Bengali:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Public+Sans:wght@400;500;600&display=swap"
-        />
-        <meta name="theme-color" content="#006a4e" />
+        {fontStylesheets().map((href) => <link key={href} rel="stylesheet" href={href} />)}
       </head>
       <body>{children}</body>
     </html>
