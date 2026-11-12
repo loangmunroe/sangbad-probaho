@@ -50,34 +50,46 @@ export async function POST(req) {
 {"title":"...","excerpt":"এক বাক্যে সারকথা","paragraphs":["..."],"category":"slug","tags":["..."]}
 
 লেখা:
-${text.slice(0, 8000)}`;
+${text.slice(0, 5000)}`;
 
-  const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-  
+  const models = [
+    process.env.GROQ_MODEL,
+    "openai/gpt-oss-120b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+  ].filter((m, i, a) => m && a.indexOf(m) === i);
+
   try {
-    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: "system", content: "You are a professional Bengali news editor. Output only valid JSON." },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.4,
-        response_format: { type: "json_object" }
-      }),
-    });
-    
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error?.message || `Groq error ${r.status}`);
-    
-    const contentString = data.choices?.[0]?.message?.content || "{}";
-    const out = JSON.parse(contentString);
-    
+    let out = null;
+    let lastErr = "";
+    // একটা মডেলের সীমা শেষ হলে পরেরটা চেষ্টা করে
+    for (const model of models) {
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: "You are a professional Bengali news editor. Output only valid JSON." },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.4,
+          max_completion_tokens: 2500,
+          response_format: { type: "json_object" },
+          ...(model.includes("gpt-oss") ? { reasoning_effort: "low" } : {}),
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        out = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+        break;
+      }
+      lastErr = data?.error?.message || `Groq ${r.status}`;
+      if (![400, 404, 413, 429, 503].includes(r.status)) break;
+    }
+    if (!out) throw new Error(lastErr || "কোনো মডেল সাড়া দেয়নি");
+
     return Response.json({
       title: out.title || "",
       excerpt: out.excerpt || "",
