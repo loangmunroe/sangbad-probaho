@@ -19,22 +19,28 @@ function bangabda(date) {
     days -= lens[m];
     m++;
   }
-  return `${toBn(days + 1)} ${MONTHS[m]} ${toBn(startYear - 593)} বঙ্গাব্দ`;
+  return `${toBn(days + 1)} ${MONTHS[m]} ${toBn(startYear - 593)}`;
 }
 
+/** হেডারের তারিখ: বাংলা (ইংরেজি তারিখ বাংলায় + বঙ্গাব্দ) আর ইংরেজি */
 export default function TodayDate() {
-  const [text, setText] = useState("");
+  const [d, setD] = useState(null);
   useEffect(() => {
     const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Dhaka" }));
-    const greg = new Intl.DateTimeFormat("bn-BD", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now);
-    let hijri = "";
-    try {
-      hijri = new Intl.DateTimeFormat("bn-BD-u-ca-islamic-umalqura", { day: "numeric", month: "long", year: "numeric" })
-        .format(now)
-        .replace(/যুগ|AH/g, "")
-        .trim() + " হিজরি";
-    } catch {}
-    setText([greg, bangabda(now), hijri].filter(Boolean).join(" · "));
+    setD({
+      bn: new Intl.DateTimeFormat("bn-BD", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now),
+      bangla: bangabda(now),
+      en: new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now),
+    });
   }, []);
-  return <span suppressHydrationWarning>{text || " "}</span>;
+  if (!d) return <span className="dates">&nbsp;</span>;
+  return (
+    <span className="dates">
+      <span>{d.bn}</span>
+      <span className="sep" aria-hidden="true" />
+      <span>{d.bangla} বঙ্গাব্দ</span>
+      <span className="sep sep-en" aria-hidden="true" />
+      <span lang="en" className="date-en">{d.en}</span>
+    </span>
+  );
 }

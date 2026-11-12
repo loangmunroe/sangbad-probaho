@@ -1,5 +1,14 @@
-// নিজস্ব লোগো: "প্রবাহ" = স্রোত, তাই তিনটি ঢেউয়ের রেখা
-export default function Logo({ name, size = "md" }) {
+// সেটিংসে লোগো ছবি দেওয়া থাকলে সেটা, না থাকলে নিজস্ব চিহ্ন + নাম
+export default function Logo({ name, src, height = 46, size = "md" }) {
+  if (src) {
+    const h = size === "sm" ? Math.min(34, height) : size === "md" ? Math.min(40, height) : height;
+    return (
+      <span className="logo logo-img">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={name} style={{ height: h }} />
+      </span>
+    );
+  }
   return (
     <span className={`logo logo-${size}`}>
       <svg className="logo-mark" viewBox="0 0 40 40" aria-hidden="true">
