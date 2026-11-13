@@ -3,6 +3,18 @@
    রং: বাংলাদেশের পতাকার সবুজ (ব্র্যান্ড) ও লাল (সদ্য/লাইভ)
    ফন্ট ও আকার সেটিংস থেকে আসে (<html style> এ --f-head, --f-body, --h-scale, --body-size)
    ============================================================ */
+/* সোলায়মান লিপি: নিজের সাইট থেকেই লোড হয় (বাইরের সার্ভারের ওপর নির্ভর নেই) */
+@font-face {
+  font-family: "SolaimanLipi"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/fonts/solaimanlipi-normal-v1.0.woff2") format("woff2");
+  unicode-range: U+0964-0965, U+0980-09FE, U+200C-200D, U+25CC;
+}
+@font-face {
+  font-family: "SolaimanLipi"; font-style: normal; font-weight: 600 800; font-display: swap;
+  src: url("/fonts/solaimanlipi-bold-v1.0.woff2") format("woff2");
+  unicode-range: U+0964-0965, U+0980-09FE, U+200C-200D, U+25CC;
+}
+
 :root {
   --green: #006a4e;
   --green-ink: #00513b;
@@ -14,8 +26,8 @@
   --surface: #f3f5f4;
   --white: #fff;
 
-  --f-head: Inter, "Hind Siliguri", sans-serif;
-  --f-body: Inter, "Hind Siliguri", system-ui, sans-serif;
+  --f-head: Inter, "SolaimanLipi", "Noto Sans Bengali", sans-serif;
+  --f-body: Inter, "SolaimanLipi", "Noto Sans Bengali", system-ui, sans-serif;
   --h-scale: 1;
   --body-size: 18px;
 
@@ -99,7 +111,7 @@ button, input, textarea, select { font: inherit; }
 .nav-in::-webkit-scrollbar { display: none; }
 .nav a {
   white-space: nowrap; padding: 11px 13px 9px; font-weight: 600; font-size: 17px; color: var(--ink);
-  border-bottom: 3px solid transparent; margin-bottom: -2px; font-family: var(--f-head);
+  border-bottom: 3px solid transparent; margin-bottom: -2px; font-family: var(--f-body);
 }
 .nav a:hover { color: var(--green); }
 .nav a.on { color: var(--green); border-bottom-color: var(--green); }
@@ -117,7 +129,7 @@ button, input, textarea, select { font: inherit; }
 .drawer.open .drawer-panel { transform: none; }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--rule); }
 .drawer-nav { display: flex; flex-direction: column; padding: 8px 0; }
-.drawer-nav a { display: flex; align-items: center; gap: 12px; padding: 11px 22px; font-size: 18px; font-weight: 600; color: var(--ink); font-family: var(--f-head); }
+.drawer-nav a { display: flex; align-items: center; gap: 12px; padding: 11px 22px; font-size: 18px; font-weight: 600; color: var(--ink); }
 .drawer-nav a:hover { background: var(--surface); color: var(--green); }
 .drawer-nav .dot { width: 8px; height: 8px; border-radius: 50%; }
 .drawer-foot { margin-top: auto; padding: 16px 22px 24px; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; font-size: 15px; color: #444; }
@@ -166,7 +178,7 @@ a:hover .ph img { transform: scale(1.03); }
 .h-lead a:hover, .h-card a:hover, .h-row a:hover, .h-mini a:hover { color: var(--green); }
 .dek { color: #555; font-size: 17px; line-height: 1.65; margin-top: 8px; }
 .dek-sm { font-size: 15.5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.kicker { font-weight: 700; font-size: 15px; font-family: var(--f-head); }
+.kicker { font-weight: 600; font-size: 15px; }
 
 .meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 14px; color: var(--meta); }
 .meta-cat { font-weight: 600; }
@@ -253,7 +265,7 @@ a:hover .ph img { transform: scale(1.03); }
 }
 .art-by-wrap { display: flex; align-items: center; gap: 12px; }
 .art-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--green); color: #fff; display: grid; place-items: center; font-weight: 700; font-family: var(--f-head); font-size: 18px; }
-.art-by { font-weight: 700; color: var(--ink); font-size: 16px; font-family: var(--f-head); }
+.art-by { font-weight: 600; color: var(--ink); font-size: 16px; }
 .art-time { font-size: 14px; color: var(--meta); }
 .dotsep { color: #c5c5c5; margin: 0 4px; }
 
