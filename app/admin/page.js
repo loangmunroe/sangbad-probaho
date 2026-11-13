@@ -105,25 +105,43 @@ export default function Admin() {
 
   return (
     <div className="adm-shell">
-      <header className="adm-top">
-        <div className="adm-brand">{data?.config?.name || "সংবাদ"} <span>অ্যাডমিন</span></div>
-        <nav className="adm-tabs">
+      <aside className="adm-side">
+        <div className="adm-brand">
+          <span className="adm-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40"><rect width="40" height="40" rx="9" fill="#006a4e" /><path d="M7 14c4.3-4 8.7-4 13 0s8.7 4 13 0M7 21c4.3-4 8.7-4 13 0s8.7 4 13 0" stroke="#fff" strokeWidth="3.2" fill="none" strokeLinecap="round" /><path d="M7 28c4.3-4 8.7-4 13 0s8.7 4 13 0" stroke="#e1251b" strokeWidth="3.2" fill="none" strokeLinecap="round" /></svg>
+          </span>
+          <span className="adm-brand-t">{data?.config?.name || "সংবাদ"}<small>পরিচালনা প্যানেল</small></span>
+        </div>
+        <nav className="adm-tabs" aria-label="অ্যাডমিন মেনু">
           {[
-            ["list", "সব খবর"],
-            ["edit", editing.id ? "এডিট" : "নতুন খবর"],
-            ["pins", "পিন করা"],
-            ["hidden", "লুকানো"],
-            ...(me?.role === "admin" ? [["visitors", "ভিজিটর"], ["settings", "সেটিংস"], ["users", "ইউজার"]] : []),
-          ].map(([k, label]) => (
-            <button key={k} className={tab === k ? "on" : ""} onClick={() => (k === "edit" && tab !== "edit" && !editing.id ? startEdit(null) : setTab(k))}>{label}</button>
+            ["list", "সব খবর", "M4 5h16M4 10h16M4 15h10M4 20h7"],
+            ["edit", editing.id ? "খবর এডিট" : "নতুন খবর", "M12 5v14M5 12h14"],
+            ["pins", "পিন করা", "M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6zM12 15v6"],
+            ["hidden", "লুকানো", "M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 5.1A10 10 0 0 1 22 12a14 14 0 0 1-2.2 3.2M6.6 6.6A14 14 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"],
+            ...(me?.role === "admin" ? [
+              ["visitors", "ভিজিটর", "M4 20V10M10 20V4M16 20v-7M22 20H2"],
+              ["settings", "সেটিংস", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"],
+              ["users", "ইউজার", "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"],
+            ] : []),
+          ].map(([k, label, d]) => (
+            <button key={k} className={tab === k ? "on" : ""} aria-current={tab === k ? "page" : undefined}
+              onClick={() => (k === "edit" && tab !== "edit" && !editing.id ? startEdit(null) : setTab(k))}>
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+              <span>{label}</span>
+            </button>
           ))}
         </nav>
-        <div className="adm-top-r">
-          <span className="adm-me">{me?.name}{me?.role === "admin" ? " · অ্যাডমিন" : " · সম্পাদক"}</span>
-          <a href="/" target="_blank" rel="noreferrer">সাইট দেখুন ↗</a>
-          <button className="ghost" onClick={async () => { await api("/api/admin/logout", "POST"); setAuth(false); }}>লগআউট</button>
+        <div className="adm-user">
+          <span className="adm-avatar" aria-hidden="true">{(me?.name || "অ").trim().charAt(0)}</span>
+          <span className="adm-user-t">{me?.name}<small>{me?.role === "admin" ? "অ্যাডমিন" : "সম্পাদক"}</small></span>
+          <a href="/" target="_blank" rel="noreferrer" className="adm-user-btn" title="সাইট দেখুন" aria-label="সাইট দেখুন">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
+          </a>
+          <button className="adm-user-btn" title="লগআউট" aria-label="লগআউট" onClick={async () => { await api("/api/admin/logout", "POST"); setAuth(false); }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
+          </button>
         </div>
-      </header>
+      </aside>
 
       <main className="adm-main">
         {!data ? <div className="adm-center">লোড হচ্ছে…</div> : (
@@ -213,10 +231,28 @@ function NewsList({ data, categories, reload, notify, onEdit }) {
     setBusy("");
   };
 
+  const todayCount = useMemo(() => {
+    const d = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+    return [...(data.auto || []), ...(data.manual || [])].filter((n) => new Date(n.publishedAt).toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }) === d).length;
+  }, [data]);
+
   return (
     <section>
+      <header className="adm-pagehead">
+        <div>
+          <h2 className="adm-h">সব খবর</h2>
+          <p className="adm-sub">স্বয়ংক্রিয় ও নিজের লেখা সব খবর এখানে। পিন, লুকানো, ছবি বদল আর এডিট এখান থেকেই।</p>
+        </div>
+        <button onClick={() => onEdit(null)}>+ নতুন খবর</button>
+      </header>
+      <div className="adm-stats adm-stats-sm">
+        <button className={`adm-stat ${type === "all" ? "on" : ""}`} onClick={() => setType("all")}><b>{bn((data.auto || []).length + (data.manual || []).length - hidden.size)}</b><span>মোট খবর</span></button>
+        <div className="adm-stat"><b>{bn(todayCount)}</b><span>আজ প্রকাশিত</span></div>
+        <button className={`adm-stat ${type === "pinned" ? "on" : ""}`} onClick={() => setType("pinned")}><b>{bn(pins.size)}</b><span>পিন করা</span></button>
+        <button className={`adm-stat ${type === "draft" ? "on" : ""}`} onClick={() => setType("draft")}><b>{bn((data.manual || []).filter((n) => n.status === "draft").length)}</b><span>খসড়া</span></button>
+      </div>
       <div className="adm-filters">
-        <input placeholder="শিরোনাম বা সূত্র দিয়ে খুঁজুন…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder="শিরোনাম দিয়ে খুঁজুন…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select value={cat} onChange={(e) => setCat(e.target.value)}>
           <option value="">সব ক্যাটাগরি</option>
           {categories.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
@@ -228,9 +264,8 @@ function NewsList({ data, categories, reload, notify, onEdit }) {
           <option value="draft">খসড়া</option>
           <option value="pinned">পিন করা</option>
         </select>
-        <button onClick={() => onEdit(null)}>+ নতুন খবর</button>
       </div>
-      <p className="adm-count">মোট {bn(items.length)}টি খবর দেখানো হচ্ছে</p>
+      <p className="adm-count">{bn(items.length)}টি খবর দেখানো হচ্ছে</p>
 
       <div className="adm-list">
         {items.map((n) => {
@@ -544,10 +579,10 @@ function Hidden({ data, reload, notify }) {
 
 /* ---------------- settings ---------------- */
 const FONTS = {
-  "hind-siliguri": "হিন্দ শিলিগুড়ি (পরিষ্কার, আধুনিক)",
-  solaimanlipi: "সোলায়মান লিপি (ক্লাসিক)",
+  solaimanlipi: "সোলায়মান লিপি (বাংলাদেশি পত্রিকার পরিচিত ফন্ট)",
   "noto-serif-bengali": "নোটো সেরিফ বাংলা (পত্রিকার মতো)",
-  "noto-sans-bengali": "নোটো স্যান্স বাংলা",
+  "noto-sans-bengali": "নোটো স্যান্স বাংলা (পরিষ্কার)",
+  "hind-siliguri": "হিন্দ শিলিগুড়ি (সংখ্যা ১ অনেকটা ৯-এর মতো দেখায়)",
   "tiro-bangla": "তিরো বাংলা (ঐতিহ্যবাহী)",
   "anek-bangla": "অনেক বাংলা (চওড়া, আধুনিক)",
 };
@@ -611,8 +646,8 @@ function Settings({ config, reload, notify }) {
     editor: config.editor || "", publisher: config.publisher || "",
     phone: config.phone || "", email: config.email || "", address: config.address || "",
     social: { ...(config.social || {}) },
-    fontHeadline: config.fontHeadline || "hind-siliguri",
-    fontBody: config.fontBody || "hind-siliguri",
+    fontHeadline: config.fontHeadline || "solaimanlipi",
+    fontBody: config.fontBody || "solaimanlipi",
     headlineScale: config.headlineScale || 100,
     bodySize: config.bodySize || 18,
     about: config.about || "", privacy: config.privacy || "",
@@ -636,9 +671,6 @@ function Settings({ config, reload, notify }) {
     l.id = id; l.rel = "stylesheet";
     l.href = "https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&family=Noto+Serif+Bengali:wght@400;700&family=Noto+Sans+Bengali:wght@400;700&family=Tiro+Bangla&family=Anek+Bangla:wght@400;700&display=swap";
     document.head.appendChild(l);
-    const l2 = document.createElement("link");
-    l2.rel = "stylesheet"; l2.href = "https://fonts.maateen.me/solaiman-lipi/font.css";
-    document.head.appendChild(l2);
   }, []);
 
   const Section = ({ id, title, children }) => (
