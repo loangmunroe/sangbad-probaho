@@ -1,9 +1,9 @@
 """
-সংবাদ প্রবাহ — অটোমেটিক নিউজ ফেচার (Groq Version)
+সংবাদ প্রবাহ — অটোমেটিক নিউজ ফেচার
 
 কী করে:
   1. config/site.json-এ থাকা প্রতিটি পত্রিকার RSS পড়ে (না পেলে Google News থেকে)
-  2. নতুন খবরের মূল লেখা থেকে তথ্য নিয়ে Groq (Llama 3) দিয়ে নিজস্ব বাংলা সারাংশ লেখায়
+  2. নতুন খবরের মূল লেখা থেকে তথ্য নিয়ে লেখার সহকারী (Gemini/Groq ইত্যাদি) দিয়ে নিজস্ব বাংলা প্রতিবেদন লেখায়
   3. সূত্র ও মূল লিংকসহ data/news.json-এ সেভ করে
 """
 
@@ -32,21 +32,42 @@ UA = (
 HEADERS = {"User-Agent": UA, "Accept-Language": "bn-BD,bn;q=0.9,en;q=0.8"}
 TIMEOUT = 20
 
-API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+def _env(k):
+    return (os.environ.get(k) or "").strip()
 
-# Groq-এর ফ্রি প্ল্যানে প্রতিটা মডেলের আলাদা দৈনিক টোকেন সীমা থাকে (যেমন gpt-oss-120b: ২ লাখ/দিন, ৮ হাজার/মিনিট)।
-# তাই একটার সীমা শেষ হলে পরেরটায় চলে যায়। GROQ_MODEL দিলে সেটা সবার আগে চেষ্টা হবে।
-DEFAULT_MODELS = [
-    "openai/gpt-oss-120b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "openai/gpt-oss-20b",
-    "llama-3.3-70b-versatile",
+
+# ফ্রি সার্ভিসগুলোর তালিকা, ক্রম অনুযায়ী চেষ্টা হবে। যার key দেওয়া আছে শুধু সেগুলোই চলবে।
+# একটা মডেলের দৈনিক সীমা শেষ হলে পরেরটায় চলে যায়, তাই সব মিলিয়ে দিনে অনেক বেশি খবর লেখা যায়।
+#   GEMINI_API_KEY      → https://aistudio.google.com/apikey  (ফ্রি, দিনে কয়েকশো থেকে হাজার অনুরোধ)
+#   GROQ_API_KEY        → https://console.groq.com/keys       (ফ্রি, প্রতি মডেলে দিনে ~২ লাখ টোকেন)
+#   CEREBRAS_API_KEY    → https://cloud.cerebras.ai           (ঐচ্ছিক)
+#   OPENROUTER_API_KEY  → https://openrouter.ai/keys          (ঐচ্ছিক, ফ্রি মডেল)
+PROVIDERS = [
+    {"name": "gemini", "key": _env("GEMINI_API_KEY"),
+     "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+     "models": [m for m in [_env("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-2.5-flash-lite"] if m],
+     "tpm": 200000},
+    {"name": "groq", "key": _env("GROQ_API_KEY"),
+     "url": "https://api.groq.com/openai/v1/chat/completions",
+     "models": [m for m in [_env("GROQ_MODEL"), "openai/gpt-oss-120b", "meta-llama/llama-4-scout-17b-16e-instruct",
+                            "openai/gpt-oss-20b", "llama-3.3-70b-versatile"] if m],
+     "tpm": 7000},
+    {"name": "cerebras", "key": _env("CEREBRAS_API_KEY"),
+     "url": "https://api.cerebras.ai/v1/chat/completions",
+     "models": ["gpt-oss-120b", "qwen-3-235b-a22b-instruct-2507", "llama-3.3-70b"],
+     "tpm": 25000},
+    {"name": "openrouter", "key": _env("OPENROUTER_API_KEY"),
+     "url": "https://openrouter.ai/api/v1/chat/completions",
+     "models": ["openai/gpt-oss-120b:free", "meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-chat-v3.1:free"],
+     "tpm": 20000},
 ]
-_first = (os.environ.get("GROQ_MODEL") or "").strip()
-MODELS = ([_first] if _first else []) + [m for m in DEFAULT_MODELS if m != _first]
+for _p in PROVIDERS:
+    _p["models"] = list(dict.fromkeys(_p["models"]))  # একই মডেল দুবার নয়
+ACTIVE = [p for p in PROVIDERS if p["key"]]
+API_KEY = "ok" if ACTIVE else ""
+MODELS = [f'{p["name"]}:{m}' for p in ACTIVE for m in p["models"]]
 _dead_models = set()   # এই রানে যেগুলোর দৈনিক সীমা শেষ বা মডেল আর নেই
-TPM_BUDGET = 7000      # প্রতি মিনিটে এর বেশি টোকেন না পাঠানোর চেষ্টা
-_last_call = {"t": 0.0, "tokens": 0}
+_last_call = {}        # সার্ভিস অনুযায়ী আগের কলের সময় ও টোকেন
 
 
 def log(*a):
@@ -156,17 +177,7 @@ def fetch_article_text(url: str) -> str:
         return ""
 
 
-# ---------------------------------------------------------------- groq
-
-_client = None
-
-def get_groq_client():
-    global _client
-    if _client is None:
-        from groq import Groq
-        _client = Groq(api_key=API_KEY)
-    return _client
-
+# ---------------------------------------------------------------- ai
 
 def build_prompt(title: str, text: str, source_name: str, categories: list, recent: list) -> str:
     cat_list = ", ".join(f'"{c["slug"]}" ({c["name"]})' for c in categories)
@@ -204,43 +215,73 @@ def build_prompt(title: str, text: str, source_name: str, categories: list, rece
 """
 
 
-def _pace():
-    """মিনিটপ্রতি টোকেন সীমা (TPM) পার না করতে আগের কলের আকার বুঝে অপেক্ষা।"""
-    need = 60.0 * _last_call["tokens"] / TPM_BUDGET
-    gap = time.time() - _last_call["t"]
+class AIError(Exception):
+    def __init__(self, status, msg):
+        super().__init__(msg)
+        self.status_code = status
+
+
+def _pace(provider):
+    """মিনিটপ্রতি টোকেন সীমা পার না করতে আগের কলের আকার বুঝে অপেক্ষা।"""
+    last = _last_call.get(provider["name"])
+    if not last:
+        return
+    need = 60.0 * last["tokens"] / provider["tpm"]
+    gap = time.time() - last["t"]
     if gap < need:
-        time.sleep(need - gap)
+        time.sleep(min(need - gap, 70))
 
 
-def _call_groq(model, prompt):
-    kwargs = dict(
-        model=model,
-        messages=[
+def _call_ai(provider, model, prompt):
+    body = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": "You are a professional Bengali news editor. Output only valid JSON."},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.4,
-        max_completion_tokens=1800,
-        response_format={"type": "json_object"},
-    )
-    if "gpt-oss" in model:
-        kwargs["reasoning_effort"] = "low"  # কম চিন্তা = কম টোকেন খরচ
-    _pace()
-    resp = get_groq_client().chat.completions.create(**kwargs)
-    used = getattr(getattr(resp, "usage", None), "total_tokens", 0) or 3000
-    _last_call.update(t=time.time(), tokens=used)
-    return resp.choices[0].message.content
+        "temperature": 0.4,
+        "response_format": {"type": "json_object"},
+    }
+    if provider["name"] == "gemini":
+        body["max_tokens"] = 2500
+        if "lite" not in model:
+            body["reasoning_effort"] = "low"
+    else:
+        body["max_tokens"] = 1800
+        if "gpt-oss" in model:
+            body["reasoning_effort"] = "low"  # কম চিন্তা = কম টোকেন খরচ
+    _pace(provider)
+    r = requests.post(provider["url"], json=body, timeout=90,
+                      headers={"Authorization": f'Bearer {provider["key"]}', "Content-Type": "application/json"})
+    if r.status_code != 200:
+        try:
+            err = r.json()
+            err = err[0] if isinstance(err, list) else err
+            msg = (err.get("error") or {}).get("message") if isinstance(err.get("error"), dict) else str(err)
+        except Exception:  # noqa: BLE001
+            msg = r.text[:300]
+        raise AIError(r.status_code, msg or f"HTTP {r.status_code}")
+    data = r.json()
+    used = (data.get("usage") or {}).get("total_tokens") or 3000
+    _last_call[provider["name"]] = {"t": time.time(), "tokens": used}
+    content = data["choices"][0]["message"].get("content") or ""
+    # কিছু মডেল ```json … ``` দিয়ে মুড়ে দেয়
+    content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+    return content
 
 
 def summarize(title, text, source_name, categories, recent):
     prompt = build_prompt(title, text, source_name, categories, recent)
     recent_ids = {n["id"] for n in recent}
-    for model in MODELS:
-        if model in _dead_models:
+    for provider in ACTIVE:
+      for model in provider["models"]:
+        tag = f'{provider["name"]}:{model}'
+        if tag in _dead_models or provider["name"] in _dead_models:
             continue
+        last_code = None
         for attempt in range(2):
             try:
-                data = json.loads(_call_groq(model, prompt))
+                data = json.loads(_call_ai(provider, model, prompt))
                 if isinstance(data, list):
                     data = data[0]
                 dup = data.get("duplicate_of")
@@ -264,19 +305,31 @@ def summarize(title, text, source_name, categories, recent):
                 code = getattr(e, "status_code", None)
                 low = msg.lower()
                 if "tokens per day" in low or "requests per day" in low or "(tpd)" in low or "(rpd)" in low:
-                    log(f"   ! {model}: আজকের সীমা শেষ, পরের মডেলে যাচ্ছি")
-                    _dead_models.add(model)
+                    log(f"   ! {tag}: আজকের সীমা শেষ, পরের মডেলে যাচ্ছি")
+                    _dead_models.add(tag)
                     break
                 if code in (400, 404) and ("model" in low and ("not found" in low or "decommission" in low or "does not exist" in low)):
-                    log(f"   ! {model}: মডেল পাওয়া যায়নি, বাদ")
-                    _dead_models.add(model)
+                    log(f"   ! {tag}: মডেল পাওয়া যায়নি, বাদ")
+                    _dead_models.add(tag)
                     break
                 if code == 413 or "request too large" in low:
-                    log(f"   ! {model}: লেখা বেশি বড়, পরের মডেলে যাচ্ছি")
+                    log(f"   ! {tag}: লেখা বেশি বড়, পরের মডেলে যাচ্ছি")
                     break
-                wait = 60 if (code == 429 or "429" in msg) else 5
-                log(f"   ! {model} error (try {attempt + 1}): {msg[:160]}")
+                if code in (401, 403):
+                    log(f"   ! {provider['name']}: key কাজ করছে না ({code}), এই সার্ভিস বাদ")
+                    _dead_models.add(provider["name"])
+                    break
+                last_code = code
+                if code == 429 and attempt == 1:
+                    break
+                hint = re.search(r"retry in ([\d.]+)s", msg)
+                wait = min(float(hint.group(1)) + 1, 65) if hint else (60 if code == 429 else 5)
+                log(f"   ! {tag} error (try {attempt + 1}): {msg[:160]}")
                 time.sleep(wait)
+        if last_code == 429:
+            # দুবার পরপর সীমা: এই রানে এই মডেল আর নয়
+            log(f"   ! {tag}: সীমায় আটকে আছে, পরের মডেলে যাচ্ছি")
+            _dead_models.add(tag)
     return None
 
 
@@ -375,14 +428,13 @@ def wikimedia_image(subject: str, used: set, strict: bool = True):
 def find_image(subject, query, used: set, category: str = ""):
     """
     শুধু Wikimedia Commons-এর মুক্ত লাইসেন্সের আসল ছবি (স্টক ফটো নয়)।
-    আগে খবরের মূল ব্যক্তি/জায়গার নাম দিয়ে খোঁজে, না পেলে বিষয়ের শব্দ দিয়ে।
+    খবরের মূল ব্যক্তি/জায়গার নাম দিয়ে খোঁজে।
     কিছু না মিললে খবর ছবি ছাড়াই যায়, সাইট সেটা সুন্দরভাবে দেখায়।
     """
     img = None
     if subject:
         img = wikimedia_image(subject, used)
-    if not img and query:
-        img = wikimedia_image(f"{query} Bangladesh", used, strict=False)
+    # বিষয়ের সাধারণ শব্দ দিয়ে খুঁজলে অন্য ঘটনার ছবি চলে আসে, তাই শুধু নির্দিষ্ট ব্যক্তি/জায়গার ছবি
     return img or {}
 
 
@@ -391,7 +443,7 @@ def find_image(subject, query, used: set, category: str = ""):
 def main():
     log(f"মডেল ক্রম: {', '.join(MODELS)}")
     if not API_KEY:
-        log("GROQ_API_KEY সেট করা নেই। GitHub → Settings → Secrets-এ যোগ করুন।")
+        log("কোনো লেখার সার্ভিসের key নেই। GitHub → Settings → Secrets-এ GEMINI_API_KEY বা GROQ_API_KEY যোগ করুন।")
         sys.exit(1)
 
     cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -455,7 +507,7 @@ def main():
             seen.add(url)
             continue
 
-        # ধাপ ২: Groq একই কলে ঘটনা মিলিয়ে দেখে + লেখে
+        # ধাপ ২: একই কলে ঘটনা মিলিয়ে দেখে + লেখে
         ai = summarize(it["title"], text, src["name"], categories, recent[:40])
         if not ai:
             continue
