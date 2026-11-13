@@ -18,9 +18,16 @@ function htmlToText(html) {
 export async function POST(req) {
   if (!(await isAuthed())) return unauthorized();
   
-  // Groq API Key চেক করা
-  const key = process.env.GROQ_API_KEY;
-  if (!key) return Response.json({ error: "Vercel-এ GROQ_API_KEY সেট করা নেই" }, { status: 500 });
+  // লেখার সার্ভিস: আগে Gemini, তারপর Groq (যার key আছে)
+  const chain = [
+    ...(process.env.GEMINI_API_KEY ? [process.env.GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.5-flash-lite"].filter(Boolean).map((m) => ({
+      url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: process.env.GEMINI_API_KEY, model: m,
+    })) : []),
+    ...(process.env.GROQ_API_KEY ? [process.env.GROQ_MODEL, "openai/gpt-oss-120b", "meta-llama/llama-4-scout-17b-16e-instruct", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"].filter(Boolean).map((m) => ({
+      url: "https://api.groq.com/openai/v1/chat/completions", key: process.env.GROQ_API_KEY, model: m,
+    })) : []),
+  ].filter((x, i, a) => a.findIndex((y) => y.url === x.url && y.model === x.model) === i);
+  if (!chain.length) return Response.json({ error: "Vercel-এ GEMINI_API_KEY বা GROQ_API_KEY সেট করা নেই" }, { status: 500 });
 
   let { text = "", url = "", sourceName = "" } = await req.json().catch(() => ({}));
   if (!text && url) {
@@ -52,20 +59,12 @@ export async function POST(req) {
 লেখা:
 ${text.slice(0, 5000)}`;
 
-  const models = [
-    process.env.GROQ_MODEL,
-    "openai/gpt-oss-120b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "openai/gpt-oss-20b",
-    "llama-3.3-70b-versatile",
-  ].filter((m, i, a) => m && a.indexOf(m) === i);
-
   try {
     let out = null;
     let lastErr = "";
     // একটা মডেলের সীমা শেষ হলে পরেরটা চেষ্টা করে
-    for (const model of models) {
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    for (const { url, key, model } of chain) {
+      const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify({
@@ -75,18 +74,19 @@ ${text.slice(0, 5000)}`;
             { role: "user", content: prompt },
           ],
           temperature: 0.4,
-          max_completion_tokens: 2500,
+          max_tokens: 2500,
           response_format: { type: "json_object" },
-          ...(model.includes("gpt-oss") ? { reasoning_effort: "low" } : {}),
+          ...(model.includes("gpt-oss") || model === "gemini-2.5-flash" ? { reasoning_effort: "low" } : {}),
         }),
       });
       const data = await r.json().catch(() => ({}));
       if (r.ok) {
-        out = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+        out = JSON.parse((data.choices?.[0]?.message?.content || "{}").trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
         break;
       }
-      lastErr = data?.error?.message || `Groq ${r.status}`;
-      if (![400, 404, 413, 429, 503].includes(r.status)) break;
+      const e = Array.isArray(data) ? data[0] : data;
+      lastErr = e?.error?.message || `সমস্যা ${r.status}`;
+      if (![400, 401, 403, 404, 413, 429, 500, 503].includes(r.status)) break;
     }
     if (!out) throw new Error(lastErr || "কোনো মডেল সাড়া দেয়নি");
 
